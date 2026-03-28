@@ -420,27 +420,130 @@ The Ninja Message Builder takes a user's onboarding profile (their business, nic
 ### Input Methods
 
 **Method 1: Document Upload**
-- User fills out the Ninja onboarding form offline (PDF, Word, or other format)
-- Uploads completed document via Filament file upload
+- User fills out a copy of the **Ninja Prospecting Client Success Questionnaire** offline
+- Supported formats: `.docx` (Word), `.pdf`, `.txt`, `.rtf`
+- Uploads completed document via Filament file upload on the Onboarding Profile page
 - System parses the document:
+  - Word (.docx): `phpoffice/phpword` for structured extraction — can identify questions vs answers by formatting (questions are in black, answers are instructed to be in red per the original form)
   - PDF: `smalot/pdfparser` or `spatie/pdf-to-text` for text extraction
-  - Word (.docx): `phpoffice/phpword` for structured extraction
-  - Fallback: send raw text to Claude API with a parsing prompt to extract structured answers
-- Extracted answers stored as structured JSON in `onboarding_profiles` table
-- Claude API called with extracted answers to identify any ambiguous or missing answers → follow-up questions presented to user
-- Packages to add: `smalot/pdfparser ^2.0`, `phpoffice/phpword ^1.0`
+  - Fallback for any format: send raw text to Claude API (Haiku) with a structured parsing prompt: "Given this completed questionnaire, extract the answer to each of the following questions and return as JSON keyed by field name"
+- Parsing maps extracted answers to the same JSON field structure as the web form (e.g., `target_client_description`, `elevator_pitch`, `flagship_product`, etc.)
+- Extracted answers stored as structured JSON in `onboarding_profiles` table — identical schema whether entered via upload or web form
+- After parsing, user sees a review screen showing what was extracted per field, with ability to correct/edit any misparses
+- Claude API (Haiku) called to identify missing or ambiguous answers → follow-up questions presented to user
+- Packages: `smalot/pdfparser ^2.0`, `phpoffice/phpword ^1.0`
 
 **Method 2: Web Form**
-- Custom Filament page with a multi-step wizard form mirroring the onboarding document
-- Sections/steps based on the onboarding form structure (to be finalized when form is uploaded):
-  - **About You & Your Business** — name, business name, niche/industry, years in business, business model (coaching, consulting, agency, service)
-  - **Your Offer** — what you sell, who it's for, primary transformation/outcome, price range
-  - **Your Ideal Client** — job titles, industries, company size, pain points, what makes them "ideal"
-  - **Your Voice & Tone** — communication style (formal/casual/somewhere between), personality adjectives, words/phrases to avoid, words/phrases to use
-  - **Your Outreach Goals** — what kind of messages to generate, preferred call-to-action, what "success" looks like (book a call, start a conversation, etc.)
-- Answers saved to `onboarding_profiles` table as structured JSON
+- Custom Filament page with a multi-step wizard form mirroring the Ninja Prospecting Client Success Questionnaire
+- Source document: `Ninja Prospecting - Client Success Questionnaire.docx`
+- 6-step wizard with progress indicator, auto-save on each step, resumable across sessions
+
+**Step 1: Your Ideal Client Avatar** (core of the questionnaire — deepest section)
+| Field | Type | Question |
+|---|---|---|
+| `target_client_description` | textarea (required) | Who is your TARGET client(s)? (titles, demographics, company size, geography, keywords) |
+| `anti_client` | textarea | Who are you NOT interested in? Which anti-client do you have? |
+| `favorite_client_and_why` | textarea | If you could have more of your favorite client, who would it be, and why? |
+| `what_makes_ideal` | textarea | What makes them the ideal avatar to pursue? |
+| `elevator_pitch` | textarea (required) | You meet your ideal client face-to-face. You have 15 seconds to get their attention. What do you say? |
+| `client_daily_routine` | textarea | What does their morning, daily, weekly, and monthly routine look like? |
+| `number_one_fix` | textarea (required) | What is the #1 thing they need to get fixed ASAP? |
+| `trying_to_avoid` | textarea | What are they trying to avoid by getting this issue resolved, and why? |
+| `cost_of_inaction` | textarea | What is the cost of inaction (COI) if they don't get this sorted out NOW? |
+| `biggest_mistake` | textarea | Describe the biggest mistake your perfect client is making at the moment. |
+| `primary_pain` | textarea (required) | What is their PRIMARY pain/problem? (the smokescreen) |
+| `secondary_pain` | textarea (required) | What is their SECONDARY pain/problem? (the root cause) |
+| `why_not_resolved` | textarea | Why aren't these problems resolved yet? |
+| `feel_when_resolved` | textarea | How will they feel when these problems are resolved? |
+| `feel_if_not_solved` | textarea | How would they feel if they did NOT get this problem solved ASAP? |
+| `who_they_blame` | textarea | Who are they blaming for having these problems, and why? |
+| `life_they_admire` | textarea | What is the life they admire the most and think about having ALL THE TIME, and why? |
+| `current_self_description` | textarea | What do they describe themselves as currently? |
+| `biggest_embarrassments` | textarea | What are the biggest embarrassments they don't want people to know about? |
+| `daily_thoughts` | textarea | What goes through their minds on a daily basis / keeps them up at night? |
+| `current_emotions` | textarea | How do they feel (emotions) right now based on what they are saying to themselves? |
+| `constant_complaints` | textarea | What are they constantly complaining about (to themselves, spouse, friends, family)? |
+| `biggest_fears` | textarea | What are their biggest fears, and why? |
+| `most_humiliated` | textarea | When do they / will they feel the most humiliated? |
+
+**Step 2: Desired Outcomes & Trust** (what the ideal client wants)
+| Field | Type | Question |
+|---|---|---|
+| `primary_result` | textarea (required) | What's the primary result/outcome they're looking to achieve? |
+| `why_beneficial` | textarea | Why would that be beneficial to them? |
+| `how_they_know_they_have_it` | textarea | What would make them realize they have it? |
+| `what_they_would_sacrifice` | textarea | What would they sacrifice so they could have it? |
+| `top_3_things_need_to_hear` | textarea (required) | What are the top 3 things they NEED to hear? |
+| `where_seeking_opinions` | textarea | Where are they seeking opinions from, and why? |
+| `hearing_from_others` | textarea | What are they hearing from others at the moment? |
+| `why_work_with_you` | textarea (required) | WHY should people work with you and your company? |
+| `best_client_testimonial` | textarea | What would your best clients say if asked how you have helped them? |
+
+**Step 3: Your Company & Offer** (product/service details)
+| Field | Type | Question |
+|---|---|---|
+| `company_name` | text (required) | What is your company name? |
+| `company_purpose` | textarea (required) | What is your company's purpose? |
+| `flagship_product` | textarea (required) | What is your FLAGSHIP product or service? (price, offer pillars, etc.) |
+| `vision_mission` | textarea | Do you have a clear vision or mission statement? If yes, what is it? |
+| `unique_selling_proposition` | textarea (required) | What is your unique selling proposition? What makes your company different and unique? |
+| `biggest_successes` | textarea | What have been the biggest successes of your business so far? |
+| `current_challenges` | textarea | What challenges are you currently facing in your business? |
+| `top_3_goals` | textarea | If you had 3 absolutely key goals for your business, what would they be? |
+| `low_hanging_fruit` | textarea | Is there any low-hanging fruit, warm market, or audience we could monetize ASAP? |
+| `life_change_after_product` | textarea | Is anything going to change in their personal/work/family life after your product? |
+| `expected_results` | textarea (required) | What kind of results can they expect? |
+| `case_studies` | textarea | Can you share case studies/examples of successful clients? |
+| `risk_reversal` | textarea | What is the risk reversal you can incorporate? Any measurables or guarantees? |
+| `support_provided` | textarea | What support does your offer provide? |
+| `onboarding_process` | textarea | What is the process after payment? What does your onboarding look like? |
+| `offer_in_own_words` | textarea (required) | In your own words, detail your offer. Who are you helping and how? |
+| `product_features` | textarea | What are the features of your product/service? |
+| `sell_us` | textarea (required) | Convince us to buy your product or service — sell us! |
+| `common_objections` | textarea | What are the most common objections to your product or service? |
+| `additional_problems_solved` | textarea | List at least 2 additional problems your product/service solves. |
+| `faqs` | textarea | What are some frequently asked questions about your product or service? |
+| `competitors` | textarea (required) | List your top competitors (at least 5). |
+| `why_not_competitors` | textarea | Why SHOULDN'T ideal clients work with these competitors? Why steer clear? |
+
+**Step 4: Voice, Tone & Writing Style** (critical for AI message generation)
+| Field | Type | Question |
+|---|---|---|
+| `tone_of_voice` | select (required) | What tone of voice do you like to use? Options: Formal / Humorous / Assertive / Conversational / Other |
+| `tone_of_voice_other` | text | If "Other" — describe your preferred tone |
+| `writing_style` | select (required) | What is your writing style? Options: Storytelling/Personal / Blunt/To the Point / Lots of Detail / Other |
+| `writing_style_other` | text | If "Other" — describe your writing style |
+| `writing_sample` | textarea (required) | Provide a paragraph of your writing that best captures your voice. |
+| `message_anti_patterns` | textarea (required) | What DON'T you want your messages to sound like? What leaves you with a bad impression? |
+
+**Step 5: LinkedIn Presence** (for context and outreach strategy)
+| Field | Type | Question |
+|---|---|---|
+| `linkedin_needs_updating` | select | Does your LinkedIn profile need updating? Does it match your audience and offer? Options: Yes, needs work / It's good / Not sure |
+| `linkedin_connections` | text | How many connections do you currently have on LinkedIn? |
+| `has_sales_navigator` | select | Do you have LinkedIn Sales Navigator? Options: Yes / No / Planning to get it |
+| `scheduling_link` | text | What online calendar do you use for scheduling? (provide link) |
+| `current_crm` | text | What CRM do you use for follow-up? (if none, say so) |
+| `linkedin_content_activity` | textarea | Do you currently post content on LinkedIn? How often? Do you engage in others' content? |
+| `desired_cta` | textarea (required) | What is your desired call to action if they want to know more? (e.g., book a call, masterclass, training, case study) — Please choose 2! |
+| `social_media_links` | textarea | What's the link to your professional social media profiles? |
+| `content_links` | textarea | Do you have articles, blog posts, lead magnets, videos related to your offer? (list with links) |
+| `sample_clients` | textarea | List 4-5 current clients — this helps us find the ideal clients for you. |
+
+**Step 6: Review & Submit**
+- Read-only summary of all answers grouped by section
+- Edit buttons per section to jump back and modify
+- "Submit Profile" button — triggers AI clarification step
+- Progress badge showing completion % (all required fields filled = 100%)
+
+**Form behavior:**
+- Answers saved to `onboarding_profiles` table as structured JSON (keyed by field name)
+- Auto-save on every step change and every 30 seconds of inactivity
 - Progress auto-saved — user can complete over multiple sessions
-- Validation: required fields enforced, AI follow-up questions if answers are too vague
+- Required field validation per step (cannot advance past a step with missing required fields)
+- Character count guidance on textarea fields (recommended minimums for AI quality)
+- "Skip for now" option on non-required fields with visual indicator of skipped questions
+- Total questions: ~60 across 5 content steps + review step
 
 **AI Clarification Step (both methods):**
 - After onboarding profile is submitted (either method), the AI reviews the answers
@@ -529,18 +632,47 @@ user_id: fk → users
 workspace_id: fk → workspaces
 method: enum (document_upload/web_form)
 status: enum (in_progress/completed/needs_clarification)
+current_step: integer (default 1) — which wizard step the user is on (1-6)
 document_path: string (nullable) — uploaded file path in Supabase Storage
 document_parsed_text: text (nullable) — raw extracted text from uploaded document
-answers: json — structured onboarding answers (business, offer, ideal client, voice, goals)
+answers: json — structured onboarding answers keyed by field name, e.g.:
+  {
+    // Step 1: Ideal Client Avatar (~24 fields)
+    "target_client_description": "Female executives over 50, VP titles...",
+    "anti_client": "...",
+    "elevator_pitch": "...",
+    "primary_pain": "...",
+    "secondary_pain": "...",
+    // Step 2: Desired Outcomes & Trust (~9 fields)
+    "primary_result": "...",
+    "why_work_with_you": "...",
+    // Step 3: Company & Offer (~22 fields)
+    "company_name": "...",
+    "flagship_product": "...",
+    "unique_selling_proposition": "...",
+    // Step 4: Voice, Tone & Writing Style (~6 fields)
+    "tone_of_voice": "conversational",
+    "writing_style": "storytelling",
+    "writing_sample": "...",
+    "message_anti_patterns": "...",
+    // Step 5: LinkedIn Presence (~10 fields)
+    "desired_cta": "...",
+    "linkedin_connections": "...",
+    ...
+  }
 clarification_questions: json (nullable) — AI-generated follow-up questions
 clarification_answers: json (nullable) — user's responses to follow-up questions
-ai_profile_summary: text (nullable) — AI-generated summary of the user's profile for use in prompts
+ai_profile_summary: text (nullable) — AI-generated condensed summary (~300-500 tokens) used in every prompt
+completion_percentage: integer (default 0) — % of required fields completed
 version: integer (default 1) — incremented on major updates (user can re-onboard)
 completed_at: timestamp (nullable)
+last_saved_at: timestamp (nullable) — auto-save timestamp
 created_at, updated_at
 INDEX: user_id
 INDEX: workspace_id
 ```
+
+> The `answers` JSON contains ~60 fields mapped 1:1 from the Ninja Prospecting Client Success Questionnaire. The same JSON schema is used whether the user fills out the web form (Method 2) or uploads a document (Method 1, parsed into the same structure). See the web form field tables in Phase 0.5 for the complete field list.
 
 **`ai_generated_messages`** (individual generated messages)
 ```
