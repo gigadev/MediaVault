@@ -545,12 +545,177 @@ The Ninja Message Builder takes a user's onboarding profile (their business, nic
 - "Skip for now" option on non-required fields with visual indicator of skipped questions
 - Total questions: ~60 across 5 content steps + review step
 
-**AI Clarification Step (both methods):**
-- After onboarding profile is submitted (either method), the AI reviews the answers
+**AI Clarification Step (both intake forms):**
+- After each intake form is submitted (either method), the AI reviews the answers
 - If any answers are vague, contradictory, or missing context, the AI generates clarification questions
 - Presented as a conversational follow-up: "I noticed you said your ideal client is 'business owners' — can you be more specific? What industry, company size, or role?"
-- User answers are appended to the onboarding profile
-- This step is optional — user can skip and generate with what they have
+- User answers are appended to the respective profile
+- This step is optional — user can skip and proceed to the next intake form or to generation
+
+### Intake Form 2: Strategic Campaign Blueprint (required before messaging)
+
+> **Gate:** Users MUST complete both the Client Success Questionnaire (Intake 1) AND the Strategic Campaign Blueprint (Intake 2) before any AI messaging can be generated. The Message Builder page shows a clear progress tracker: Intake 1 → Intake 2 → Generate Messages.
+
+**Purpose:** While the Client Success Questionnaire captures the broad foundation (who you are, what you offer, your ideal client's psychology), the Strategic Campaign Blueprint narrows the focus to a specific 30-day campaign targeting one precise audience slice with one clear theme. This is what makes the AI messaging sharp rather than generic.
+
+**Source document:** `Strategic Campaign Blueprint.docx`
+
+**Input methods (same as Intake 1):**
+- **Document upload:** User fills out a copy of the Strategic Campaign Blueprint offline and uploads it. Parsed using the same extraction pipeline (phpword/pdfparser → Claude Haiku fallback → structured JSON).
+- **Web form:** Multi-step wizard within Filament, 4 content steps + commitment summary + review.
+
+**Web Form — Step-by-Step:**
+
+**Step 1: Strategic Audience Focus** (narrowing from Intake 1's broad avatar to a precise 30-day target)
+| Field | Type | Question |
+|---|---|---|
+| `audience_clarity_score` | select (required) | On a scale of 1-5, how clear are you on your ideal client? Options: 1 (Very unclear) / 2 / 3 / 4 / 5 (Crystal clear) |
+| `top_3_client_types` | textarea (required) | List the top 3 types of clients you work with or want more of. |
+| `one_group_30_days` | textarea (required) | If we could only target ONE group for the next 30 days, who would it be? |
+| `precise_slice` | textarea (required) | Define that slice precisely (Title, Industry, Company size, Geography, Stage of growth). |
+| `relevance_trigger` | textarea (required) | What must be happening in their world for your work to be especially relevant? |
+| `who_should_not_respond` | textarea | Who should NOT respond to our outreach? |
+| `why_this_slice` | textarea (required) | Why is this slice strategically stronger than your other options? |
+
+**Step 2: Their World & Internal Pressure** (deepening understanding of the target's current state)
+| Field | Type | Question |
+|---|---|---|
+| `ultimately_responsible_for` | textarea (required) | What are they ultimately responsible for? |
+| `quiet_pressure` | textarea (required) | What pressure do they quietly carry? |
+| `internal_conversations` | textarea | What conversations are they already having internally about this challenge? |
+| `repeated_frustration` | textarea (required) | What frustration shows up repeatedly? |
+| `likely_mistake` | textarea | What mistake are they likely making right now? |
+| `if_nothing_changes` | textarea (required) | If nothing changes in the next 6-12 months, what happens? |
+| `tired_of_hearing` | textarea (required) | What are they tired of hearing from vendors in your space? |
+
+**Step 3: Message Anchor, Theme & Positioning** (the strategic core of the campaign)
+| Field | Type | Question |
+|---|---|---|
+| `they_want_without` | textarea (required) | Complete this sentence: They want ______ without ______. |
+| `primary_theme` | textarea (required) | What is the ONE primary theme we are leading with this month? |
+| `theme_unavoidable_stage` | textarea | At what stage does this theme become unavoidable? |
+| `their_exact_language` | textarea (required) | What exact language do they use when describing this issue? |
+| `common_misconception` | textarea | What common misconception exists about this problem? |
+| `why_uniquely_credible` | textarea (required) | Why are you uniquely credible to serve this slice? |
+| `what_you_see_differently` | textarea | What do you see differently than others in your industry? |
+| `competitors_get_wrong` | textarea | What do competitors typically get wrong? |
+| `meaningful_client_outcome` | textarea (required) | Share one short example of a meaningful client outcome. |
+
+**Step 4: Offer & Conversation Strategy** (how the outreach should feel and flow)
+| Field | Type | Question |
+|---|---|---|
+| `flagship_offer_details` | textarea (required) | What is your flagship offer (price, structure, duration)? |
+| `most_common_objection` | textarea (required) | What objection surfaces most often? |
+| `belief_shift_required` | textarea | What belief must shift for someone to say yes? |
+| `fastest_closing_client` | textarea | What kind of client closes fastest with you? |
+| `first_interaction_feel` | textarea (required) | The first interaction should feel like ______ (primary and secondary). |
+| `warmth_scale` | select (required) | On a scale of 1-10, how warm should the first ask feel? Options: 1-10 |
+| `not_now_strategy` | textarea (required) | If someone says 'not now,' how should we keep the relationship open? |
+
+**Step 5: Final Campaign Commitment** (confirmation of strategic direction)
+
+> This step synthesizes the user's answers into a focused 30-day campaign commitment. It can be pre-populated by the AI based on their answers in Steps 1-4, with the user confirming or editing.
+
+| Field | Type | Question |
+|---|---|---|
+| `commitment_target_person` | textarea (required) | The Exact Person We Are Targeting: Who are we building relationships with? (Title, industry, company size, stage) |
+| `commitment_main_issue` | textarea (required) | The Main Issue We Will Lead With: What is the primary tension or outcome we will center outreach around? (one clear sentence) |
+| `commitment_relevance_timing` | textarea (required) | When This Issue Becomes Especially Relevant: In what situation or stage does this challenge surface? (e.g., when growth slows, after hiring, during leadership transition, when referrals dip, during rapid scaling) |
+| `commitment_conversation_approach` | select (required) | How We Should Show Up in Conversation — Primary approach. Options: Insight-driven (pattern recognition and perspective) / Collaborative (comparing notes and exchanging ideas) / Community-focused (inviting into discussion or group) / Peer-level (casual and conversational) / Future-focused (long-term, no urgency) |
+| `commitment_conversation_secondary` | select | Secondary approach (optional). Same options as above. |
+| `commitment_strategic_rationale` | textarea (required) | Why This Focus Makes Strategic Sense: In 2-3 sentences, explain why this direction gives us the highest probability of meaningful conversations. |
+
+**Step 6: Review & Submit**
+- Read-only summary of all answers grouped by section
+- AI-generated "Campaign Summary" card at the top: one-paragraph synthesis of the target, theme, positioning, and approach (generated by Haiku from the answers)
+- Edit buttons per section to jump back and modify
+- "Submit Blueprint" button — triggers AI clarification step
+- Completion percentage based on required fields
+
+**Form behavior:**
+- Same auto-save, resume-across-sessions, and validation behavior as Intake 1
+- Total questions: 30 across 5 content steps + review
+- Required fields are more strict here than Intake 1 — this form demands specificity by design
+- The intro text from the original document ("If responses are broad, messaging will be broad. If responses are specific, messaging will be sharp.") is displayed as guidance at the top of the form
+
+**Data model:**
+
+**`campaign_blueprints`** (Strategic Campaign Blueprint — one per active campaign focus)
+```
+id: ulid (pk)
+user_id: fk → users
+workspace_id: fk → workspaces
+onboarding_profile_id: fk → onboarding_profiles — links to the Intake 1 profile this builds on
+method: enum (document_upload/web_form)
+status: enum (in_progress/completed/needs_clarification)
+current_step: integer (default 1) — which wizard step (1-6)
+document_path: string (nullable) — uploaded file path
+document_parsed_text: text (nullable) — raw extracted text
+answers: json — structured answers keyed by field name, e.g.:
+  {
+    // Step 1: Strategic Audience Focus (~7 fields)
+    "audience_clarity_score": "4",
+    "one_group_30_days": "VP of Operations at mid-market SaaS companies...",
+    "precise_slice": "VP/Director of Ops, B2B SaaS, 50-200 employees, US, Series A-B...",
+    // Step 2: Their World & Internal Pressure (~7 fields)
+    "quiet_pressure": "...",
+    "tired_of_hearing": "...",
+    // Step 3: Message Anchor, Theme & Positioning (~9 fields)
+    "they_want_without": "They want scalable operations without hiring more people",
+    "primary_theme": "...",
+    "their_exact_language": "...",
+    // Step 4: Offer & Conversation Strategy (~7 fields)
+    "warmth_scale": "7",
+    "not_now_strategy": "...",
+    // Step 5: Final Campaign Commitment (~6 fields)
+    "commitment_target_person": "...",
+    "commitment_conversation_approach": "insight_driven",
+    ...
+  }
+clarification_questions: json (nullable)
+clarification_answers: json (nullable)
+ai_campaign_summary: text (nullable) — AI-generated one-paragraph campaign synthesis for use in prompts
+completion_percentage: integer (default 0)
+is_active: boolean (default true) — only one active blueprint per workspace at a time
+campaign_start_date: date (nullable) — when the 30-day campaign focus begins
+campaign_end_date: date (nullable) — auto-set to start + 30 days
+version: integer (default 1)
+completed_at: timestamp (nullable)
+last_saved_at: timestamp (nullable)
+created_at, updated_at
+INDEX: user_id
+INDEX: workspace_id, is_active
+INDEX: onboarding_profile_id
+```
+
+**Relationship to Intake 1:**
+- A `campaign_blueprint` always belongs to an `onboarding_profile` — you cannot create a blueprint without completing Intake 1 first
+- One onboarding profile can have multiple blueprints over time (different 30-day campaign focuses)
+- Only one blueprint is `is_active = true` per workspace at any time — this is the one used for AI message generation
+- When a blueprint expires (30 days), user is prompted to create a new one or extend
+
+**How both intakes feed the AI prompt:**
+```
+System Prompt Composition:
+  1. Ninja Prospecting Philosophy (from versioned prompt file)     ~500 tokens
+  2. Message Type Instructions (connection request, follow-up, etc.) ~200 tokens
+  3. User's Onboarding Profile Summary (from onboarding_profiles.ai_profile_summary)  ~400 tokens
+  4. Active Campaign Blueprint Summary (from campaign_blueprints.ai_campaign_summary)  ~300 tokens
+  5. Output Format Instructions (JSON schema)                        ~100 tokens
+  ─────────────────────────────────────────────────────────────────
+  Total: ~1,500 tokens per call
+```
+
+The Campaign Blueprint provides the **sharpness** — it tells the AI exactly who to target, what theme to lead with, what language to use, and how warm the approach should feel. Without it, the AI would only have the broad profile and produce generic messages.
+
+**Updated user flow (complete path to messaging):**
+```
+Register → Complete Intake 1 (Client Success Questionnaire)
+         → Complete Intake 2 (Strategic Campaign Blueprint)
+         → Message Builder UNLOCKED
+         → Quick Generate or Chat Refinement
+         → Review, Edit, Save, Copy messages
+```
 
 ### Message Generation
 
@@ -680,6 +845,7 @@ id: ulid (pk)
 user_id: fk → users
 workspace_id: fk → workspaces
 onboarding_profile_id: fk → onboarding_profiles
+campaign_blueprint_id: fk → campaign_blueprints — which campaign focus generated this message
 message_type: enum (connection_request/conversation_starter/follow_up/call_to_action)
 sequence_position: integer (nullable) — for follow-up sequences (1, 2, 3, etc.)
 content: text — the generated message text
@@ -734,11 +900,22 @@ UNIQUE(workspace_id, period_start)
 - New navigation group: **"Messaging"** (positioned before Contacts)
   - Ninja Message Builder (main feature page)
   - My Messages (saved message library)
-  - Onboarding Profile (edit/re-do onboarding)
+  - Onboarding Profile (Intake 1 — edit/re-do)
+  - Campaign Blueprint (Intake 2 — edit/re-do/create new)
 
 **`NinjaMessageBuilderPage`** (Custom Filament Page — main hub):
-- **Top section:** Onboarding status card
-  - If not completed: prominent CTA "Complete your onboarding profile to unlock AI messaging"
+- **Top section:** Two-step intake progress tracker
+  - **Intake 1 status card:** Client Success Questionnaire
+    - If not completed: prominent CTA "Complete your onboarding profile (Step 1 of 2)"
+    - If completed: green checkmark, summary card, "Edit Profile" link
+  - **Intake 2 status card:** Strategic Campaign Blueprint
+    - If Intake 1 not completed: locked/grayed out with "Complete Step 1 first"
+    - If Intake 1 completed but Intake 2 not started: CTA "Define your campaign focus (Step 2 of 2)"
+    - If completed: green checkmark, campaign summary, active date range, "Edit Blueprint" / "New Blueprint" links
+    - If expired (past 30 days): amber badge "Campaign blueprint expired — create a new one or extend"
+  - **Message Builder:** locked until both intakes are complete
+    - Shows: "Complete both intake forms to unlock AI messaging"
+    - Once unlocked: full generation panel visible
   - If completed: summary card showing business name, niche, offer, with "Edit Profile" link
 - **Message Generation Panel:**
   - Message type selector (checkboxes: connection request, conversation starter, follow-up sequence, CTA)
@@ -793,11 +970,20 @@ UNIQUE(workspace_id, period_start)
 - Prompt versioning: each prompt has a version number, stored with generated messages for reproducibility
 
 **`MessageGenerationService`** (orchestrator):
-- `generateMessages(User $user, array $messageTypes, int $quantity, string $mode): Collection` — main generation method
+- `generateMessages(User $user, array $messageTypes, int $quantity, string $mode): Collection` — main generation method; requires both completed `OnboardingProfile` + active `CampaignBlueprint`
+- `canGenerate(User $user): bool` — checks both intakes are complete and blueprint is active (not expired)
 - `regenerateMessage(AiGeneratedMessage $message): AiGeneratedMessage` — regenerate a single message
-- `parseDocumentUpload(string $filePath): array` — extracts structured answers from uploaded document
-- `requestClarification(OnboardingProfile $profile): ?array` — asks AI for follow-up questions
-- `summarizeProfile(OnboardingProfile $profile): string` — generates AI summary of profile for prompt efficiency
+- `parseDocumentUpload(string $filePath, string $formType): array` — extracts structured answers from uploaded document; `$formType` = 'onboarding' or 'blueprint'
+- `requestClarification(OnboardingProfile|CampaignBlueprint $profile): ?array` — asks AI for follow-up questions on either intake form
+- `summarizeProfile(OnboardingProfile $profile): string` — generates AI summary of Intake 1 for prompt efficiency
+- `summarizeBlueprint(CampaignBlueprint $blueprint): string` — generates AI summary of Intake 2 for prompt efficiency
+
+**`CampaignBlueprintService`** (Intake 2 management):
+- `createBlueprint(User $user, OnboardingProfile $profile): CampaignBlueprint` — creates new blueprint linked to onboarding profile
+- `activateBlueprint(CampaignBlueprint $blueprint): void` — sets as active, deactivates any previous active blueprint
+- `isExpired(CampaignBlueprint $blueprint): bool` — checks if 30-day campaign window has passed
+- `extendBlueprint(CampaignBlueprint $blueprint, int $days = 30): void` — extends campaign end date
+- `prefillCommitment(CampaignBlueprint $blueprint): array` — uses AI (Haiku) to pre-populate Step 5 (Final Campaign Commitment) from answers in Steps 1-4
 
 **`AiChatService`** (chat refinement):
 - `startSession(User $user, ?string $context): AiChatSession` — creates new chat session with onboarding context
@@ -845,21 +1031,26 @@ phpoffice/phpword ^1.0 — Word document parsing for document upload
 ### Testing
 
 Key test scenarios for AI Messaging Studio:
-1. Onboarding web form — complete all steps, verify JSON stored correctly, status = completed
-2. Document upload — upload PDF/Word, verify text extracted, verify structured answers parsed
-3. AI clarification — submit vague profile, verify AI generates follow-up questions, verify answers appended
-4. Quick generate — select connection requests x5, verify 5 messages returned, verify stored in DB, verify correct message type
-5. Chat refinement — open chat, send "make it more casual", verify AI responds with adjusted message, verify conversation history maintained
-6. Message actions — copy to clipboard, edit inline, save to library, regenerate, verify all state changes
-7. Usage tracking — generate messages, verify token counts recorded, verify monthly aggregation correct
-8. Plan limits (post-beta) — free user at 25 messages, verify 26th blocked with upgrade prompt
-9. System prompt integrity — verify philosophy/anti-patterns included in every API call, verify user cannot inject into system prompt
-10. API failure handling — mock API timeout, verify graceful error message, verify no data loss
+1. Intake 1 web form — complete all 6 steps of Client Success Questionnaire, verify JSON stored correctly, status = completed
+2. Intake 1 document upload — upload PDF/Word, verify text extracted, verify structured answers parsed into same JSON schema
+3. Intake 2 web form — complete all 6 steps of Strategic Campaign Blueprint, verify JSON stored, verify linked to onboarding profile
+4. Intake 2 gating — attempt to start Intake 2 without completing Intake 1 → verify blocked with "Complete Step 1 first"
+5. Message generation gating — attempt to generate messages with only Intake 1 complete → verify blocked with "Complete Step 2 (Campaign Blueprint) first"
+6. Blueprint commitment pre-fill — complete Steps 1-4 of Intake 2 → verify AI pre-populates Step 5 (Final Campaign Commitment) from answers
+7. Blueprint expiration — create blueprint, advance date 31 days → verify expired status, verify user prompted to create new or extend
+8. AI clarification (both intakes) — submit vague answers in either form, verify AI generates follow-up questions, verify answers appended
+9. Quick generate — both intakes complete → select connection requests x5 → verify 5 messages returned, verify stored with both profile_id and blueprint_id
+10. Chat refinement — open chat, send "make it more casual", verify AI responds with adjusted message, verify conversation history maintained
+11. Message actions — copy to clipboard, edit inline, save to library, regenerate, verify all state changes
+12. Usage tracking — generate messages, verify token counts recorded, verify monthly aggregation correct
+13. Plan limits (post-beta) — free user at 25 messages, verify 26th blocked with upgrade prompt
+14. System prompt integrity — verify philosophy + profile summary + blueprint summary all included in every API call, verify user cannot inject into system prompt
+15. API failure handling — mock API timeout, verify graceful error message, verify no data loss
 
 ### Verification
 
-1. **Onboarding → Generation flow:** Complete onboarding profile → generate 5 connection requests → verify messages reflect user's niche, offer, and tone preferences
-2. **Document upload flow:** Upload filled onboarding PDF → verify answers extracted → generate messages → verify quality matches web form flow
+1. **Full intake → generation flow:** Complete Intake 1 (Client Success Questionnaire) → Complete Intake 2 (Strategic Campaign Blueprint) → generate 5 connection requests → verify messages reflect user's niche, offer, tone, AND campaign-specific targeting/theme/warmth
+2. **Document upload flow (both forms):** Upload filled questionnaire PDF → verify answers extracted → upload filled blueprint PDF → verify extracted → generate messages → verify quality matches web form flow
 3. **Chat refinement:** Generate messages → open AI Coach → request "more casual tone" → verify adjusted messages → save to library → verify appears in My Messages
 4. **Ninja philosophy compliance:** Generate 20 messages across all types → manually review → verify NONE contain: pitch in connection request, fake compliments, "I help X do Y" openers, manipulative urgency
 5. **Cost monitoring:** Generate 100 message batches → verify `ai_usage_tracking` totals match expected token counts → verify estimated cost is reasonable
