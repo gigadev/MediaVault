@@ -28,7 +28,266 @@
 | Code Quality | Pint + Larastan |
 | Queue | Laravel Queue (database driver) |
 | Cache | Redis (or database) |
+| AI / LLM | Claude API (Anthropic) — Haiku + Sonnet models |
+| AI Integration | anthropic/anthropic-php (MIT) or Laravel Http facade |
+| Document Parsing | smalot/pdfparser + phpoffice/phpword |
 | Deployment | Laravel Forge / Vapor + Supabase |
+
+---
+
+## AI Architecture & Strategy
+
+> This section defines the AI approach used across the entire application — from the Phase 0.5 Ninja Message Builder through Phase 4's Smart/AI Layer. All AI-powered features share the same provider, infrastructure, prompt management system, and cost controls.
+
+### Provider Decision: Claude API (Anthropic)
+
+After evaluating the three viable approaches — commercial API (Claude, OpenAI), open-source self-hosted (Llama, Mistral), and hybrid — we recommend **Claude API** as the sole AI provider for NinjaCRM.
+
+**Why Claude over alternatives:**
+
+| Consideration | Claude API (Recommended) | OpenAI GPT-4 | Open-Source (Llama 3, Mistral) |
+|---|---|---|---|
+| Writing quality | Excellent — nuanced, professional tone; best at following brand voice constraints | Very good — slightly more "generic AI" tone without heavy prompting | Good but requires fine-tuning for consistent quality |
+| System prompt adherence | Best-in-class — reliably follows detailed system prompts with philosophy/values | Good but can drift on long system prompts | Variable, depends on model and fine-tuning |
+| Structured output | Native tool use + JSON mode | Function calling + JSON mode | Requires more prompt engineering |
+| Cost (per message batch) | ~$0.01-0.03 per 5-message generation (Haiku for drafts, Sonnet for refinement) | ~$0.03-0.10 per generation (GPT-4o) | Free inference but hosting costs ~$200-500/mo for GPU |
+| Licensing | Commercial API — pay per token, no model ownership restrictions, output is yours | Same — commercial API, pay per token | Varies: Llama 3 (Meta license, commercial OK), Mistral (Apache 2.0) |
+| Latency | Fast (Haiku: <2s, Sonnet: 3-5s for 5 messages) | Fast (GPT-4o: 3-5s) | Depends on hosting infrastructure |
+| Privacy | Data not used for training (API terms) | Data not used for training (API terms) | Full control — self-hosted |
+| Integration effort | Low — PHP SDK or HTTP client | Low — PHP SDK or HTTP client | High — need to host, manage, scale inference |
+
+**The deciding factors:**
+1. **System prompt adherence** — the Ninja Prospecting philosophy is a complex, nuanced set of rules that the AI must follow consistently. Claude's ability to follow long, detailed system prompts without drift is the single most important factor.
+2. **Writing quality** — outreach messaging is the product. "Good enough" writing quality directly impacts user satisfaction and retention.
+3. **No infrastructure burden** — self-hosting adds ops complexity (GPU provisioning, model updates, scaling) that is wrong for a small team launching a SaaS.
+
+### Two-Model Strategy
+
+| Model | Use Case | Cost/Call | Latency | When Used |
+|---|---|---|---|---|
+| Claude Haiku | Quick-generate mode, document parsing, profile summarization, clarification questions | ~$0.001 | <2s | High-volume, speed-critical operations |
+| Claude Sonnet | Chat refinement, high-quality message generation, nuanced rewrites, contact-specific messages | ~$0.01 | 3-5s | Quality-critical operations, user-facing conversations |
+
+**Cost projections at scale:**
+
+| Monthly Active Users | Avg Generations/User | Estimated Monthly API Cost |
+|---|---|---|
+| 100 (launch) | 20 | $5-15 |
+| 1,000 | 15 | $40-80 |
+| 5,000 | 10 | $100-200 |
+| 10,000 | 10 | $200-400 |
+
+These costs are negligible relative to subscription revenue — even at 10,000 users with Agency pricing, AI costs are <1% of MRR.
+
+### Licensing & Legal
+
+**Claude API (Anthropic):**
+- Commercial use: fully permitted under API Terms of Service
+- Output ownership: users own all generated content — Anthropic claims no rights to API outputs
+- Training data: API inputs and outputs are NOT used to train Anthropic's models (explicit in API terms, separate from consumer Claude)
+- Data retention: API logs retained for 30 days for abuse monitoring, then deleted (can request zero-retention via agreement)
+- No per-seat or per-user licensing — purely usage-based (input tokens + output tokens)
+- No minimum commitment — pay as you go
+
+**PHP SDK:**
+- `anthropic/anthropic-php` — MIT license, no restrictions
+- Alternative: direct HTTP calls via Laravel's `Http::withHeaders()->post()` — zero dependency
+
+**Document parsing libraries:**
+- `smalot/pdfparser` — LGPL-3.0 (fine for server-side use, not distributed with the app)
+- `phpoffice/phpword` — LGPL-2.1 (same — server-side use is fine)
+
+### Technical Architecture
+
+**Integration pattern — Laravel service layer (not microservice):**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Filament Dashboard                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │ Message       │  │ Chat         │  │ Contact AI       │  │
+│  │ Builder Page  │  │ Refinement   │  │ Actions (Phase1+)│  │
+│  └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘  │
+└─────────┼──────────────────┼───────────────────┼────────────┘
+          │                  │                   │
+          ▼                  ▼                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Laravel Service Layer                      │
+│  ┌────────────────────┐  ┌────────────────────────────────┐ │
+│  │ MessageGeneration   │  │ AiChatService                  │ │
+│  │ Service             │  │ (multi-turn conversations)     │ │
+│  └────────┬───────────┘  └──────────┬─────────────────────┘ │
+│           │                         │                        │
+│           ▼                         ▼                        │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │              NinjaPromptService                          ││
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ││
+│  │  │ Philosophy   │  │ Message Type │  │ User Context  │  ││
+│  │  │ Prompt       │  │ Instructions │  │ Builder       │  ││
+│  │  │ (versioned)  │  │ (per type)   │  │ (from profile)│  ││
+│  │  └──────────────┘  └──────────────┘  └──────────────┘  ││
+│  └────────────────────────┬────────────────────────────────┘│
+│                           │                                  │
+│                           ▼                                  │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │              AnthropicClientService                      ││
+│  │  - Model selection (Haiku vs Sonnet)                     ││
+│  │  - Retry logic (3 attempts, exponential backoff)         ││
+│  │  - Rate limiting (respect Anthropic limits)              ││
+│  │  - Token counting & cost tracking                        ││
+│  │  - Structured JSON response parsing                      ││
+│  │  - Error handling & graceful degradation                 ││
+│  └────────────────────────┬────────────────────────────────┘│
+└───────────────────────────┼──────────────────────────────────┘
+                            │ HTTPS (REST API)
+                            ▼
+                 ┌──────────────────────┐
+                 │  Anthropic Claude API │
+                 │  api.anthropic.com    │
+                 └──────────────────────┘
+```
+
+The AI is **not** a separate service, container, or microservice. It is a set of Laravel service classes that make HTTP calls to the Claude API. This means:
+- No additional servers to deploy or manage
+- No model files to download or update
+- No GPU infrastructure
+- No Docker containers for ML
+- Scales automatically with the Anthropic API (their infrastructure)
+- New model versions adopted by changing a config value
+
+### Environment Configuration
+
+```php
+// .env
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+ANTHROPIC_DEFAULT_MODEL=claude-haiku-4-5-20251001
+ANTHROPIC_QUALITY_MODEL=claude-sonnet-4-6
+ANTHROPIC_MAX_TOKENS=4096
+ANTHROPIC_TIMEOUT_SECONDS=30
+ANTHROPIC_RETRY_ATTEMPTS=3
+ANTHROPIC_RATE_LIMIT_RPM=60
+
+// Feature flags
+AI_MESSAGING_ENABLED=true
+AI_CHAT_REFINEMENT_ENABLED=true
+AI_USAGE_TRACKING_ENABLED=true
+AI_BETA_UNLIMITED=true  // Set to false post-beta to enforce plan limits
+```
+
+```php
+// config/ai.php
+return [
+    'provider' => 'anthropic',
+    'anthropic' => [
+        'api_key' => env('ANTHROPIC_API_KEY'),
+        'default_model' => env('ANTHROPIC_DEFAULT_MODEL', 'claude-haiku-4-5-20251001'),
+        'quality_model' => env('ANTHROPIC_QUALITY_MODEL', 'claude-sonnet-4-6'),
+        'max_tokens' => env('ANTHROPIC_MAX_TOKENS', 4096),
+        'timeout' => env('ANTHROPIC_TIMEOUT_SECONDS', 30),
+        'retry_attempts' => env('ANTHROPIC_RETRY_ATTEMPTS', 3),
+        'rate_limit_rpm' => env('ANTHROPIC_RATE_LIMIT_RPM', 60),
+    ],
+    'features' => [
+        'messaging_enabled' => env('AI_MESSAGING_ENABLED', true),
+        'chat_refinement_enabled' => env('AI_CHAT_REFINEMENT_ENABLED', true),
+        'usage_tracking_enabled' => env('AI_USAGE_TRACKING_ENABLED', true),
+        'beta_unlimited' => env('AI_BETA_UNLIMITED', true),
+    ],
+    'prompts' => [
+        'version' => '1.0.0',  // Increment on philosophy/prompt changes
+        'philosophy_path' => resource_path('prompts/ninja-philosophy.md'),
+        'message_types_path' => resource_path('prompts/message-types.md'),
+    ],
+    'limits' => [
+        'max_messages_per_generation' => 20,
+        'max_chat_messages_per_session' => 50,
+        'max_document_upload_size_mb' => 10,
+    ],
+];
+```
+
+### Prompt Management & Versioning
+
+The system prompt is the competitive moat of the AI messaging feature. It must be carefully managed:
+
+**File structure:**
+```
+resources/
+  prompts/
+    ninja-philosophy.md          — Core Ninja Prospecting values and anti-patterns
+    message-types/
+      connection-request.md      — Rules for connection request generation
+      conversation-starter.md    — Rules for conversation starters
+      follow-up-sequence.md      — Rules for follow-up sequences
+      call-to-action.md          — Rules for CTA/offer messages
+    system-prompt-template.md    — Master template that combines philosophy + type + user context
+```
+
+**Versioning strategy:**
+- Each prompt file has a version header: `<!-- prompt-version: 1.2.0 -->`
+- Version stored alongside every generated message in `ai_generated_messages.prompt_version`
+- When prompts are updated, old messages retain their version — allows A/B comparison
+- Prompt changes tracked in git like any other code change
+- `NinjaPromptService::getPromptVersion(): string` — returns current active version
+
+**Prompt composition (how the system prompt is assembled):**
+1. **Base philosophy** (`ninja-philosophy.md`) — always included, ~500 tokens
+2. **Message type instructions** (e.g., `connection-request.md`) — per-type, ~200 tokens
+3. **User context** (from `onboarding_profiles.answers`) — dynamic, ~300-500 tokens
+4. **Output format instructions** (JSON schema for structured response) — ~100 tokens
+5. **Total system prompt:** ~1,100-1,300 tokens per call — well within efficient range
+
+### Error Handling & Resilience
+
+**API failure modes and responses:**
+
+| Failure | Detection | User Experience | Technical Response |
+|---|---|---|---|
+| API timeout (>30s) | HTTP timeout exception | "Message generation is taking longer than expected. Please try again." | Log, increment retry counter, retry up to 3x with exponential backoff |
+| Rate limit (429) | HTTP 429 response | "We're experiencing high demand. Your messages will be ready in a moment." | Queue the request, retry after `retry-after` header value |
+| API error (500) | HTTP 5xx response | "AI service is temporarily unavailable. Please try again in a few minutes." | Log error, alert ops via Slack/email if >5 failures in 10 minutes |
+| API key invalid (401) | HTTP 401 response | "AI service configuration error. Our team has been notified." | Critical alert to ops team — immediate action required |
+| Content filtered | API refusal response | "The AI couldn't generate a message with those parameters. Try adjusting your profile." | Log the refusal, do NOT retry with same prompt |
+| Malformed response | JSON parse failure | "Something went wrong. Regenerating..." | Auto-retry once with same prompt, log malformed response for debugging |
+
+**Circuit breaker pattern:**
+- If >10 API failures in 5 minutes → circuit opens → all AI requests return "temporarily unavailable" for 2 minutes → then half-open (allow 1 request to test) → if succeeds, close circuit
+- Implemented via Laravel cache: `Cache::increment('anthropic_failures')` with TTL
+
+**No failover to different AI provider.** Switching providers mid-session would produce inconsistent voice and quality. Better to show "unavailable" than to silently switch to a different model. Anthropic's API has 99.9%+ uptime — extended outages are extremely rare.
+
+### Cost Controls & Monitoring
+
+**Per-workspace usage tracking:**
+- Every API call logged to `ai_usage_tracking` with token counts
+- `AiUsageService::getMonthlyUsage(Workspace)` — returns current period stats
+- Dashboard widget for admins: total API spend, per-workspace breakdown, trend chart
+
+**Cost guardrails:**
+- Per-workspace monthly token cap (configurable per plan tier, enforced by `AiUsageService`)
+- Per-request max tokens: 4,096 output tokens (prevents runaway generation)
+- Max messages per single generation: 20 (UI limit)
+- Max chat messages per session: 50 (prevents infinite conversations)
+- Global monthly spend alert: notification if total API cost exceeds configurable threshold
+
+**Optimization strategies:**
+- Cache onboarding profile summaries (`onboarding_profiles.ai_profile_summary`) — regenerate only when profile changes, saves ~300 tokens per call
+- Use Haiku for all non-user-facing operations (parsing, summarization, clarification)
+- Batch generation in single API call (5 messages = 1 call, not 5 calls)
+- Prompt caching: Anthropic supports prompt caching for repeated system prompts — saves ~90% on cached tokens for the philosophy portion
+
+### How Phase 4 AI Features Build on This Infrastructure
+
+The Phase 0.5 AI infrastructure is designed to be the foundation for all later AI features:
+
+| Phase 4 Feature | Reuses from Phase 0.5 |
+|---|---|
+| 4A: AI Message Suggestions | `AnthropicClientService`, `NinjaPromptService`, `ai_generated_messages` table, prompt versioning |
+| 4B: Nudge Engine | `AnthropicClientService` (Haiku for stall detection), `AiUsageService` for cost tracking |
+| 4C: Smart Segmentation | `AnthropicClientService` (Sonnet for NL search), same error handling and circuit breaker |
+| Chrome Extension AI | Same API client, same prompt service, same usage tracking — just called from API routes instead of Livewire |
+
+No new AI infrastructure is needed in Phase 4 — only new prompt templates and service methods layered on top of the existing `AnthropicClientService` and `NinjaPromptService`.
 
 ---
 
@@ -144,9 +403,340 @@ Path B — OAuth SSO:
 
 ---
 
-## Phase 1: Core CRM MVP (Weeks 2-8)
+## Phase 0.5: AI Messaging Studio — "Ninja Message Builder" (Weeks 2-4)
 
-### Phase 1A: Data Modeling (Week 2)
+> **Priority:** This is the first feature built after user registration and basic SaaS scaffolding (Phase 0). It delivers immediate standalone value — users can generate outreach messaging before any CRM features exist. Once the CRM is built (Phase 1+), this integrates directly with contacts, templates, pipelines, and campaigns.
+
+### AI Implementation
+
+> Full AI architecture, provider comparison, licensing, cost projections, environment config, error handling, and prompt management are documented in the top-level **"AI Architecture & Strategy"** section above. Phase 0.5 is the first consumer of that shared infrastructure.
+
+**Summary:** Uses Claude API (Anthropic) with a two-model strategy — Haiku for quick generation, Sonnet for chat refinement. Laravel service classes call the API via HTTP. No model hosting required. See "AI Architecture & Strategy" for full details.
+
+### Feature Overview
+
+The Ninja Message Builder takes a user's onboarding profile (their business, niche, offer, ideal client, and communication style) and generates personalized outreach messages aligned with the Ninja Prospecting relationship-first philosophy. Two input methods, two interaction modes, four message types.
+
+### Input Methods
+
+**Method 1: Document Upload**
+- User fills out the Ninja onboarding form offline (PDF, Word, or other format)
+- Uploads completed document via Filament file upload
+- System parses the document:
+  - PDF: `smalot/pdfparser` or `spatie/pdf-to-text` for text extraction
+  - Word (.docx): `phpoffice/phpword` for structured extraction
+  - Fallback: send raw text to Claude API with a parsing prompt to extract structured answers
+- Extracted answers stored as structured JSON in `onboarding_profiles` table
+- Claude API called with extracted answers to identify any ambiguous or missing answers → follow-up questions presented to user
+- Packages to add: `smalot/pdfparser ^2.0`, `phpoffice/phpword ^1.0`
+
+**Method 2: Web Form**
+- Custom Filament page with a multi-step wizard form mirroring the onboarding document
+- Sections/steps based on the onboarding form structure (to be finalized when form is uploaded):
+  - **About You & Your Business** — name, business name, niche/industry, years in business, business model (coaching, consulting, agency, service)
+  - **Your Offer** — what you sell, who it's for, primary transformation/outcome, price range
+  - **Your Ideal Client** — job titles, industries, company size, pain points, what makes them "ideal"
+  - **Your Voice & Tone** — communication style (formal/casual/somewhere between), personality adjectives, words/phrases to avoid, words/phrases to use
+  - **Your Outreach Goals** — what kind of messages to generate, preferred call-to-action, what "success" looks like (book a call, start a conversation, etc.)
+- Answers saved to `onboarding_profiles` table as structured JSON
+- Progress auto-saved — user can complete over multiple sessions
+- Validation: required fields enforced, AI follow-up questions if answers are too vague
+
+**AI Clarification Step (both methods):**
+- After onboarding profile is submitted (either method), the AI reviews the answers
+- If any answers are vague, contradictory, or missing context, the AI generates clarification questions
+- Presented as a conversational follow-up: "I noticed you said your ideal client is 'business owners' — can you be more specific? What industry, company size, or role?"
+- User answers are appended to the onboarding profile
+- This step is optional — user can skip and generate with what they have
+
+### Message Generation
+
+**Message Types (user selects which to generate):**
+
+| Type | Description | Typical Length | Example Use |
+|---|---|---|---|
+| Connection Request | Initial LinkedIn connection request | 200-300 chars | "Hi {Name}, I noticed we're both in the {niche} space..." |
+| Conversation Starter | First message after connection accepted | 50-150 words | Opens dialogue, references something specific, no pitch |
+| Follow-up Sequence | Multi-step follow-up series (3-5 messages) | 50-100 words each | Day 1, Day 3, Day 7 — escalating value, building trust |
+| Call-to-Action / Offer | Transition message to book a call or present offer | 75-150 words | Bridges conversation to next step, soft CTA |
+
+**Generation Flow:**
+1. User selects message type(s) to generate
+2. User sets quantity (default: 5 per type, configurable 1-20)
+3. System builds the Claude API prompt:
+   - **System prompt:** Ninja Prospecting philosophy, relationship-first principles, anti-spam rules, tone guidelines
+   - **User context:** Full onboarding profile (business, offer, ideal client, voice, goals)
+   - **Message type instructions:** Specific guidance per message type (length, structure, CTA rules)
+   - **Variation instructions:** "Generate {n} distinct variations. Each should feel unique — different angles, hooks, and approaches. Avoid formulaic patterns."
+4. Claude API call (Haiku for quick-generate, Sonnet for high-quality)
+5. Response parsed as structured JSON array of messages
+6. Messages stored in `ai_generated_messages` table linked to user + workspace
+7. Displayed in review UI
+
+**The Ninja Prospecting System Prompt (core asset):**
+
+This is the "brain" of the messaging AI — a carefully crafted system prompt that embodies the Ninja Prospecting philosophy. It is stored as a versioned config file (`config/ninja-messaging-prompt.php`) and includes:
+
+- **Philosophy layer:** Relationship-first, never lead with a pitch, serve before you sell, genuine curiosity over templates, treat every person as a human not a lead
+- **Anti-patterns:** Explicit instructions on what NOT to generate — no "I help X do Y" openers, no fake compliments, no "I noticed your profile" generic hooks, no pitch in connection requests, no manipulative urgency
+- **Tone guidelines:** Warm but professional, conversational but not sloppy, confident but not arrogant, brief but not curt
+- **Message structure rules:** Per message type — what makes a great connection request vs. a follow-up vs. a CTA
+- **Personalization instructions:** How to weave in the user's specific niche, offer, ideal client details naturally (not template-style variable insertion)
+- **Quality bar:** "Every message should feel like it was written by a thoughtful person who genuinely wants to connect — not by software"
+
+This system prompt is the competitive moat. It is NOT user-editable (they customize via their onboarding profile, not by changing the AI's instructions). Versioned and updated by the NinjaCRM team as the methodology evolves.
+
+### Interaction Modes
+
+**Mode 1: Quick Generate**
+- One-click batch generation
+- User selects message type(s) + quantity → clicks "Generate" → messages appear in 2-5 seconds
+- Uses Claude Haiku for speed and cost efficiency
+- Results displayed as cards in a grid — each with copy button, edit button, save/discard
+- Regenerate button per message ("Try another variation")
+- "Generate More" button to add additional messages to the set
+
+**Mode 2: Chat Refinement (AI Messaging Coach)**
+- Conversational UI (chat-style interface within Filament)
+- User can:
+  - Ask the AI to adjust tone: "Make this more casual" / "More professional"
+  - Request alternatives: "Give me 3 more versions of this but for coaches specifically"
+  - Ask for advice: "Which of these would work better for a CFO vs. a CEO?"
+  - Refine specific messages: "I like message #3 but the CTA feels too pushy"
+  - Generate messages for specific scenarios: "I'm reaching out to someone who liked my post about X"
+- Uses Claude Sonnet for higher-quality, context-aware responses
+- Full conversation history maintained per session
+- AI has access to the user's onboarding profile throughout the conversation
+- Messages refined in chat can be "saved to library" with one click
+
+### Data Model
+
+**New Enums:**
+| Enum | Values |
+|---|---|
+| `OnboardingMethod` | `document_upload`, `web_form` |
+| `OnboardingStatus` | `in_progress`, `completed`, `needs_clarification` |
+| `MessageType` | `connection_request`, `conversation_starter`, `follow_up`, `call_to_action` |
+| `GeneratedMessageStatus` | `draft`, `saved`, `archived`, `used` |
+| `AiInteractionMode` | `quick_generate`, `chat_refinement` |
+
+**New Tables:**
+
+**`onboarding_profiles`** (user's business/offer/audience profile for AI context)
+```
+id: ulid (pk)
+user_id: fk → users
+workspace_id: fk → workspaces
+method: enum (document_upload/web_form)
+status: enum (in_progress/completed/needs_clarification)
+document_path: string (nullable) — uploaded file path in Supabase Storage
+document_parsed_text: text (nullable) — raw extracted text from uploaded document
+answers: json — structured onboarding answers (business, offer, ideal client, voice, goals)
+clarification_questions: json (nullable) — AI-generated follow-up questions
+clarification_answers: json (nullable) — user's responses to follow-up questions
+ai_profile_summary: text (nullable) — AI-generated summary of the user's profile for use in prompts
+version: integer (default 1) — incremented on major updates (user can re-onboard)
+completed_at: timestamp (nullable)
+created_at, updated_at
+INDEX: user_id
+INDEX: workspace_id
+```
+
+**`ai_generated_messages`** (individual generated messages)
+```
+id: ulid (pk)
+user_id: fk → users
+workspace_id: fk → workspaces
+onboarding_profile_id: fk → onboarding_profiles
+message_type: enum (connection_request/conversation_starter/follow_up/call_to_action)
+sequence_position: integer (nullable) — for follow-up sequences (1, 2, 3, etc.)
+content: text — the generated message text
+status: enum (draft/saved/archived/used)
+generation_mode: enum (quick_generate/chat_refinement)
+ai_model_used: string — e.g. 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6'
+prompt_tokens: integer (nullable) — for cost tracking
+completion_tokens: integer (nullable)
+user_rating: integer (nullable) — 1-5 star rating (optional, for future prompt improvement)
+used_count: integer (default 0) — how many times user copied/used this message
+metadata: json (nullable) — generation parameters, conversation context
+created_at, updated_at
+INDEX: user_id, message_type
+INDEX: workspace_id, status
+INDEX: onboarding_profile_id
+```
+
+**`ai_chat_sessions`** (chat refinement conversation history)
+```
+id: ulid (pk)
+user_id: fk → users
+workspace_id: fk → workspaces
+onboarding_profile_id: fk → onboarding_profiles
+title: string (nullable) — auto-generated or user-set session title
+messages: json — array of {role: 'user'|'assistant', content: string, timestamp: string}
+ai_model_used: string
+total_prompt_tokens: integer (default 0)
+total_completion_tokens: integer (default 0)
+is_active: boolean (default true)
+created_at, updated_at
+INDEX: user_id, is_active
+```
+
+**`ai_usage_tracking`** (per-workspace AI usage for billing/limits)
+```
+id: ulid (pk)
+workspace_id: fk → workspaces
+period_start: date — billing period start
+period_end: date
+messages_generated: integer (default 0)
+chat_interactions: integer (default 0)
+total_prompt_tokens: integer (default 0)
+total_completion_tokens: integer (default 0)
+estimated_cost_usd: decimal(8,4) (default 0)
+created_at, updated_at
+UNIQUE(workspace_id, period_start)
+```
+
+### Filament UI Components
+
+**Navigation:**
+- New navigation group: **"Messaging"** (positioned before Contacts)
+  - Ninja Message Builder (main feature page)
+  - My Messages (saved message library)
+  - Onboarding Profile (edit/re-do onboarding)
+
+**`NinjaMessageBuilderPage`** (Custom Filament Page — main hub):
+- **Top section:** Onboarding status card
+  - If not completed: prominent CTA "Complete your onboarding profile to unlock AI messaging"
+  - If completed: summary card showing business name, niche, offer, with "Edit Profile" link
+- **Message Generation Panel:**
+  - Message type selector (checkboxes: connection request, conversation starter, follow-up sequence, CTA)
+  - Quantity slider per type (1-20, default 5)
+  - "Quick Generate" button (primary action)
+  - "Open AI Coach" button (opens chat panel)
+- **Generated Messages Grid:**
+  - Card layout, each card shows: message type badge, message text, character/word count
+  - Per-card actions: Copy to Clipboard, Edit (inline), Save to Library, Regenerate, Rate (1-5 stars)
+  - Bulk actions: Save All, Discard All, Export to Templates (future CRM integration)
+
+**`OnboardingProfilePage`** (Custom Filament Page — multi-step wizard):
+- Multi-step form with progress indicator
+- Auto-save on each step
+- Document upload option on first step (alternative to filling out the form)
+- AI clarification step at the end (if AI has follow-up questions)
+- "Profile Complete" confirmation with redirect to Message Builder
+
+**`AiChatRefinementPanel`** (Livewire Component — slide-over or side panel):
+- Chat-style interface embedded in the Message Builder page
+- User's onboarding profile summary displayed at top of chat
+- Pre-loaded with context: "I'm your Ninja messaging coach. I have your profile loaded. What would you like to work on?"
+- Message suggestions as quick-reply buttons: "Refine my connection requests", "Help me write a follow-up sequence", "Adjust tone of message #3"
+- "Save to Library" button on any AI-generated message within the chat
+- Session history: user can resume previous chat sessions
+
+**`MyMessagesPage`** (Filament Resource — saved message library):
+- Table/grid view of all saved messages
+- Filters: message type, date generated, status (draft/saved/used)
+- Search: full-text search across message content
+- Bulk actions: copy, archive, export as templates
+- Usage stats: times copied, last used date
+- **Future CRM integration point:** "Send to Contact" action (links to contact record + touchpoint logging)
+
+### Services
+
+**`AnthropicClientService`** (API wrapper):
+- Configured via `.env`: `ANTHROPIC_API_KEY`, `ANTHROPIC_DEFAULT_MODEL`
+- Methods:
+  - `generate(string $systemPrompt, string $userPrompt, string $model, ?array $tools): AnthropicResponse`
+  - `generateStructured(string $systemPrompt, string $userPrompt, string $model, string $jsonSchema): array` — returns parsed JSON
+  - `chat(array $messages, string $systemPrompt, string $model): AnthropicResponse` — multi-turn conversation
+- Handles: retries (3 attempts with exponential backoff), rate limiting, error handling, token counting
+- Logs all API calls to `ai_usage_tracking` for cost monitoring
+
+**`NinjaPromptService`** (system prompt builder):
+- `buildSystemPrompt(OnboardingProfile $profile, MessageType $type): string` — assembles the full system prompt
+- `getPhilosophyPrompt(): string` — returns the core Ninja Prospecting philosophy text
+- `getMessageTypeInstructions(MessageType $type): string` — returns type-specific generation rules
+- `buildUserContext(OnboardingProfile $profile): string` — formats the user's onboarding answers for the prompt
+- `buildClarificationPrompt(OnboardingProfile $profile): string` — asks AI to identify gaps in the profile
+- Prompt versioning: each prompt has a version number, stored with generated messages for reproducibility
+
+**`MessageGenerationService`** (orchestrator):
+- `generateMessages(User $user, array $messageTypes, int $quantity, string $mode): Collection` — main generation method
+- `regenerateMessage(AiGeneratedMessage $message): AiGeneratedMessage` — regenerate a single message
+- `parseDocumentUpload(string $filePath): array` — extracts structured answers from uploaded document
+- `requestClarification(OnboardingProfile $profile): ?array` — asks AI for follow-up questions
+- `summarizeProfile(OnboardingProfile $profile): string` — generates AI summary of profile for prompt efficiency
+
+**`AiChatService`** (chat refinement):
+- `startSession(User $user, ?string $context): AiChatSession` — creates new chat session with onboarding context
+- `sendMessage(AiChatSession $session, string $userMessage): string` — sends message, returns AI response
+- `saveMessageFromChat(AiChatSession $session, string $content, MessageType $type): AiGeneratedMessage` — saves a message from chat to library
+- `getSessionHistory(AiChatSession $session): array` — returns conversation history
+
+**`AiUsageService`** (cost tracking and limits):
+- `trackUsage(Workspace $workspace, int $promptTokens, int $completionTokens, string $model): void`
+- `getMonthlyUsage(Workspace $workspace): array` — returns current month's usage stats
+- `isWithinLimits(Workspace $workspace): bool` — checks plan-tier AI usage limits
+- `getEstimatedCost(Workspace $workspace): float` — returns estimated cost for current period
+
+### Plan Tier AI Limits (Beta: unlimited for all tiers)
+
+| Feature | Free | Solo | Pro | Agency |
+|---|---|---|---|---|
+| Messages/month | 25 | 200 | 1,000 | Unlimited |
+| Chat sessions/month | 5 | 25 | 100 | Unlimited |
+| AI model quality | Haiku only | Haiku + Sonnet | Haiku + Sonnet | Haiku + Sonnet |
+| Document upload | 1 | Yes | Yes | Yes |
+| Onboarding profiles | 1 | 1 | 5 (per client) | Unlimited |
+
+> During beta launch, all tiers get unlimited access. Limits enforced post-beta via `AiUsageService` + `PlanLimitService`.
+
+### CRM Integration Points (activated when Phase 1 is built)
+
+These integrations are designed now but implemented incrementally as CRM features come online:
+
+- **Contact → Message:** "Generate messages for this contact" action on ContactResource — pre-fills AI prompt with contact's name, company, niche, stage
+- **Template Library:** "Save as Template" action on generated messages — creates a Template record with variable placeholders
+- **Campaign Integration:** "Generate campaign sequence" — creates a full follow-up sequence as campaign steps
+- **Touchpoint Logging:** "Mark as Sent" on a generated message — creates a touchpoint on the linked contact
+- **Chrome Extension:** "Generate message for this profile" — uses the API to generate a message based on the LinkedIn profile being viewed + user's onboarding profile
+- **Performance Tracking:** correlate AI-generated messages with response rates and conversions (which messages led to replies, calls booked, deals won)
+
+### Packages to Add
+
+```
+anthropic/anthropic-php ^1.0 — or use Laravel Http facade with Anthropic REST API directly
+smalot/pdfparser ^2.0 — PDF text extraction for document upload
+phpoffice/phpword ^1.0 — Word document parsing for document upload
+```
+
+### Testing
+
+Key test scenarios for AI Messaging Studio:
+1. Onboarding web form — complete all steps, verify JSON stored correctly, status = completed
+2. Document upload — upload PDF/Word, verify text extracted, verify structured answers parsed
+3. AI clarification — submit vague profile, verify AI generates follow-up questions, verify answers appended
+4. Quick generate — select connection requests x5, verify 5 messages returned, verify stored in DB, verify correct message type
+5. Chat refinement — open chat, send "make it more casual", verify AI responds with adjusted message, verify conversation history maintained
+6. Message actions — copy to clipboard, edit inline, save to library, regenerate, verify all state changes
+7. Usage tracking — generate messages, verify token counts recorded, verify monthly aggregation correct
+8. Plan limits (post-beta) — free user at 25 messages, verify 26th blocked with upgrade prompt
+9. System prompt integrity — verify philosophy/anti-patterns included in every API call, verify user cannot inject into system prompt
+10. API failure handling — mock API timeout, verify graceful error message, verify no data loss
+
+### Verification
+
+1. **Onboarding → Generation flow:** Complete onboarding profile → generate 5 connection requests → verify messages reflect user's niche, offer, and tone preferences
+2. **Document upload flow:** Upload filled onboarding PDF → verify answers extracted → generate messages → verify quality matches web form flow
+3. **Chat refinement:** Generate messages → open AI Coach → request "more casual tone" → verify adjusted messages → save to library → verify appears in My Messages
+4. **Ninja philosophy compliance:** Generate 20 messages across all types → manually review → verify NONE contain: pitch in connection request, fake compliments, "I help X do Y" openers, manipulative urgency
+5. **Cost monitoring:** Generate 100 message batches → verify `ai_usage_tracking` totals match expected token counts → verify estimated cost is reasonable
+
+---
+
+## Phase 1: Core CRM MVP (Weeks 5-11)
+
+### Phase 1A: Data Modeling (Week 5)
 
 #### Enums
 | Enum | Values |
@@ -594,7 +1184,7 @@ delivered_at: timestamp (nullable)
 created_at, updated_at
 ```
 
-### Phase 1B: Core Filament Resources (Week 3)
+### Phase 1B: Core Filament Resources (Week 6)
 
 **ContactResource**
 - Form: 3 sections (Personal Info, LinkedIn Details, Pipeline & Status)
@@ -643,7 +1233,7 @@ created_at, updated_at
 - `LeadScoringService::recalculateAll(Workspace)` — batch job for workspace
 - Scheduled command: `RecalculateLeadScores` — nightly recalculation
 
-### Phase 1C: Touchpoint/Activity Tracking (Week 4)
+### Phase 1C: Touchpoint/Activity Tracking (Week 7)
 
 **TouchpointResource**
 - Managed via relation manager on ContactResource (not standalone)
@@ -654,7 +1244,7 @@ created_at, updated_at
 **Services:**
 - `TouchpointService::log(Contact, TouchpointType, ?body, ?metadata)` — creates touchpoint, updates contact timestamps, fires webhook events
 
-### Phase 1D: Templates & Scripts Engine (Week 4)
+### Phase 1D: Templates & Scripts Engine (Week 7)
 
 **TemplateResource**
 - Form: name, category, subject, body (rich text with variable buttons)
@@ -667,7 +1257,7 @@ created_at, updated_at
 - `TemplateService::render(Template, Contact)` — replaces variables with contact data
 - `TemplateService::getAvailableVariables()` — returns list of supported variables
 
-### Phase 1E: Today View / Daily Action Dashboard (Week 5)
+### Phase 1E: Today View / Daily Action Dashboard (Week 8)
 
 **Custom Filament Page: `TodayView`**
 - 3-column layout:
@@ -685,7 +1275,7 @@ created_at, updated_at
 - `ActivityFeedWidget` — last 10 touchpoints across workspace
 - `PerformanceWidget` — connections/week, response rate, calls booked, deals won
 
-### Phase 1F: Follow-up & Task System (Week 5)
+### Phase 1F: Follow-up & Task System (Week 8)
 
 **TaskResource**
 - Form: title, description, contact (searchable select), priority, due_at
@@ -701,7 +1291,7 @@ created_at, updated_at
 **Scheduled Command:**
 - `SendFollowUpReminders` — daily, sends notification for tasks due today
 
-### Phase 1G: Basic Reporting (Week 6)
+### Phase 1G: Basic Reporting (Week 9)
 
 **Custom Filament Page: `ReportsPage`**
 - **Connections Report** — new contacts per week/month (line chart)
@@ -727,7 +1317,7 @@ created_at, updated_at
 - `ReportingService::revenueForecast(Workspace)` — weighted pipeline by expected close date
 - `ReportingService::leadScoreDistribution(Workspace)` — score histogram + source breakdown
 
-### Phase 1H: Multi-Client Support (Week 6)
+### Phase 1H: Multi-Client Support (Week 9)
 
 **ClientResource**
 - Form: name, slug, logo, notes, is_active
@@ -738,7 +1328,7 @@ created_at, updated_at
 - Add optional `client_id` scoping for agency-tier workspaces
 - Client switcher in sidebar (for agency plan only)
 
-### Phase 1I: Import/Export & Webhooks (Week 7)
+### Phase 1I: Import/Export & Webhooks (Week 10)
 
 **CSV Import:**
 - Upload CSV → map columns → preview → import
@@ -758,7 +1348,7 @@ created_at, updated_at
 - HMAC signature on each delivery for verification
 - Delivery log viewable per endpoint
 
-### Phase 1J: Billing — Stripe Cashier + Plan Limits (Week 7-8)
+### Phase 1J: Billing — Stripe Cashier + Plan Limits (Week 10-11)
 
 **Billing Setup:**
 - `Workspace` model gets `Billable` trait (same pattern as MediaVault's Family)
@@ -821,7 +1411,7 @@ created_at, updated_at
 - Grace period: `past_due` subscriptions retain access for configurable grace window (default 3 days) before downgrading to `free`
 - Downgrade behavior: workspace retains data but loses access to gated features, with read-only access to data that exceeds new plan limits (e.g., contacts beyond free tier cap are visible but not editable)
 
-### Phase 1J-b: Subscription Security Model (Week 8)
+### Phase 1J-b: Subscription Security Model (Week 11)
 
 This phase implements the middleware, gates, and policies that enforce plan-based access control across the entire application.
 
@@ -913,7 +1503,7 @@ Widget-level gating:
 - On `invoice.payment_failed`: sets status to `past_due`, queues dunning email sequence (immediate, +3 days, +7 days)
 - On `customer.subscription.deleted`: starts grace period countdown, queues win-back email
 
-### Phase 1K: Affiliate/Referral System (Week 8)
+### Phase 1K: Affiliate/Referral System (Week 11)
 
 **Overview:**
 Built-in affiliate referral system that lets every user earn commissions by referring new subscribers. Users see a full dashboard of who they've referred and what they've earned. Admins control commission structures, approve payouts, and manage the affiliate program. The system is designed to be self-contained but swappable to Rewardful or another platform later.
@@ -1032,9 +1622,9 @@ Built-in affiliate referral system that lets every user earn commissions by refe
 
 ---
 
-## Phase 2: LinkedIn Workspace (Weeks 9-16)
+## Phase 2: LinkedIn Workspace (Weeks 12-19)
 
-### 2A: Chrome Extension + API (Weeks 9-11)
+### 2A: Chrome Extension + API (Weeks 12-14)
 - RESTful API endpoints (Sanctum-authenticated):
   - `GET /api/contacts/lookup?linkedin_url=...` — find existing contact
   - `POST /api/contacts` — quick-add from LinkedIn profile
@@ -1048,12 +1638,12 @@ Built-in affiliate referral system that lets every user earn commissions by refe
   - Quick actions: "Add to NinjaCRM", "Log Message", "Follow up in X days", "Tag as Hot"
   - One-click template copy with auto-populated variables
 
-### 2B: Social Touchpoint Tracking (Week 12)
+### 2B: Social Touchpoint Tracking (Week 15)
 - Enhanced touchpoint types: `post_like`, `post_comment`, `profile_view`, `endorsement`
 - "Engagement Score" calculated field per contact
 - Engage Queue: contacts whose content you should interact with today (based on temperature + last engagement)
 
-### 2C: Campaign Builder (Weeks 13-14)
+### 2C: Campaign Builder (Weeks 16-17)
 - Full campaign CRUD with step builder:
   - Step 1: Send connection request (template)
   - Step 2: Wait 3 days
@@ -1065,21 +1655,21 @@ Built-in affiliate referral system that lets every user earn commissions by refe
 - Analytics: enrolled, replied, completed, calls booked per campaign
 - Pre-built Ninja Prospecting playbooks as starter templates
 
-### 2D: Email Integration (Week 15)
+### 2D: Email Integration (Week 18)
 - BCC tracking: unique inbound email per workspace → parsed and attached as touchpoint
 - Optional SMTP send from NinjaCRM (for follow-up emails)
 - Email templates separate from LinkedIn message templates
 
-### 2E: Content Tracker (Week 16)
+### 2E: Content Tracker (Week 19)
 - Log which LinkedIn posts a contact engaged with
 - "Post that triggered conversation" field on touchpoint
 - Content performance: which posts generated the most conversations
 
 ---
 
-## Phase 3: Agency & Team Layer (Weeks 17-24)
+## Phase 3: Agency & Team Layer (Weeks 20-27)
 
-### 3A: Client Workspaces (Weeks 17-19)
+### 3A: Client Workspaces (Weeks 20-22)
 - Full client isolation: each client has own contacts, pipelines, templates, campaigns
 - Client dashboard: pipeline overview, activity, calls booked, revenue
 - Client login portal (read-only or limited interaction):
@@ -1087,14 +1677,14 @@ Built-in affiliate referral system that lets every user earn commissions by refe
   - See their pipeline, recent activity, reports
   - Cannot edit contacts or templates
 
-### 3B: Team Collaboration (Weeks 20-21)
+### 3B: Team Collaboration (Weeks 23-24)
 - Contact assignment to specific reps
 - Activity feed per team member
 - Internal notes (team-only) vs client-visible notes on contacts
 - @mentions in notes → notifications
 - Team performance dashboards
 
-### 3C: Advanced Reporting (Weeks 22-23)
+### 3C: Advanced Reporting (Weeks 25-26)
 - Conversion rate: per rep, per campaign, per pipeline, per lifecycle stage
 - Revenue projections from pipeline (weighted by stage probability × deal value)
 - Full-funnel analytics: prospect → lead → opportunity → customer with time-in-stage and drop-off rates
@@ -1105,7 +1695,7 @@ Built-in affiliate referral system that lets every user earn commissions by refe
 - Client-specific exportable PDF/CSV reports
 - Scheduled report emails (weekly/monthly)
 
-### 3D: White-Label Foundation (Week 24)
+### 3D: White-Label Foundation (Week 27)
 - Custom domain support per workspace (agency plan)
 - Logo, colors, favicon customization
 - Custom email sender domain
@@ -1113,21 +1703,22 @@ Built-in affiliate referral system that lets every user earn commissions by refe
 
 ---
 
-## Phase 4: Smart / AI Layer (Weeks 25-32)
+## Phase 4: Smart / AI Layer (Weeks 28-35)
 
-### 4A: AI Message Suggestions (Weeks 25-27)
-- Based on best-performing templates + contact context
-- "Suggest a follow-up" button on contact record
-- Uses Claude API or OpenAI to generate personalized messages
-- User approves/edits before use
+### 4A: AI Message Suggestions (Weeks 28-30)
+- Builds on Phase 0.5 AI infrastructure (`AnthropicClientService`, `NinjaPromptService`, prompt versioning)
+- Based on best-performing templates + contact context + onboarding profile
+- "Suggest a follow-up" button on contact record — generates context-aware message using contact's touchpoint history + pipeline stage
+- New prompt templates added to `resources/prompts/` for contact-specific generation
+- User approves/edits before use — same review UI as Ninja Message Builder
 
-### 4B: Nudge Engine (Weeks 28-30)
+### 4B: Nudge Engine (Weeks 31-33)
 - Daily scan: identify stalled conversations (no activity in X days by stage)
 - Suggest bump messages for stalled contacts
 - "Hottest leads" ranking based on engagement score + recency + stage
 - Push notifications for time-sensitive follow-ups
 
-### 4C: Smart Segmentation (Weeks 31-32)
+### 4C: Smart Segmentation (Weeks 34-35)
 - Auto-segment contacts by engagement patterns
 - "Find contacts like this one" similarity search
 - Campaign enrollment suggestions based on profile + behavior
@@ -1217,23 +1808,26 @@ Key test scenarios:
 
 ---
 
-## 90-Day Execution Summary
+## 35-Week Execution Summary
 
 | Week | Phase | Deliverable |
 |---|---|---|
-| 1 | Phase 0 | Project scaffolded, Supabase connected, Filament panel live, auth working |
-| 2 | Phase 1A | All migrations, models, enums (incl. lifecycle, deals, scoring), relationships, seeders |
-| 3 | Phase 1B | Contact + Pipeline + Deal resources, Kanban board, lifecycle conversion flow, lead scoring |
-| 4 | Phase 1C-D | Touchpoint timeline, Template engine |
-| 5 | Phase 1E-F | Today View dashboard, Task/follow-up system |
-| 6 | Phase 1G-H | Reporting page, Multi-client support |
-| 7 | Phase 1I-J | Import/export, webhooks, Stripe billing |
-| 8 | Phase 1J-b + 1K | Subscription security model (middleware, gates, policies, trial/grace handling), referral system, MVP complete |
-| 9-12 | Phase 2A-B | Chrome Extension + API, social tracking |
-| 13-14 | Phase 2C | Campaign builder with playbooks |
-| 15-16 | Phase 2D-E | Email integration, content tracker |
-| 17-24 | Phase 3 | Agency workspaces, team features, white-label |
-| 25-32 | Phase 4 | AI suggestions, nudge engine, smart segmentation |
+| 1 | Phase 0 | Project scaffolded, Supabase connected, Filament panel live, auth (email/password + OAuth SSO) working |
+| 2 | Phase 0.5a | AI Messaging Studio: onboarding profile (web form + document upload), Claude API integration, system prompt, message generation service |
+| 3 | Phase 0.5b | AI Messaging Studio: Quick Generate UI, Chat Refinement mode, My Messages library, usage tracking |
+| 4 | Phase 0.5c | AI Messaging Studio: polish, AI clarification step, all 4 message types, testing, beta-ready |
+| 5 | Phase 1A | All migrations, models, enums (incl. lifecycle, deals, scoring), relationships, seeders |
+| 6 | Phase 1B | Contact + Pipeline + Deal resources, Kanban board, lifecycle conversion flow, lead scoring |
+| 7 | Phase 1C-D | Touchpoint timeline, Template engine |
+| 8 | Phase 1E-F | Today View dashboard, Task/follow-up system |
+| 9 | Phase 1G-H | Reporting page, Multi-client support |
+| 10 | Phase 1I-J | Import/export, webhooks, Stripe billing |
+| 11 | Phase 1J-b + 1K | Subscription security model (middleware, gates, policies, trial/grace handling), referral system, MVP complete |
+| 12-15 | Phase 2A-B | Chrome Extension + API, social tracking |
+| 16-17 | Phase 2C | Campaign builder with playbooks |
+| 18-19 | Phase 2D-E | Email integration, content tracker |
+| 20-27 | Phase 3 | Agency workspaces, team features, white-label |
+| 28-35 | Phase 4 | AI suggestions, nudge engine, smart segmentation (builds on Phase 0.5 AI infrastructure) |
 
 ---
 
